@@ -1,0 +1,11 @@
+# Example endpoints_config.yaml:
+# anthropic/claude-2: http://localhost:8001
+# anthropic/claude-instant-1: http://localhost:8002
+# openai/gpt-4: http://localhost:8003
+# openai/gpt-3.5-turbo: http://localhost:8004
+
+# make sure the endpoints start with http://
+Qwen/Qwen2.5-7B-Instruct: 
+  - http://your-endpoint-url-here
+meta-llama/Llama-3.1-8B-Instruct: 
+  - http://your-endpoint-url-here
