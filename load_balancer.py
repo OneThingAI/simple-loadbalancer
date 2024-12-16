@@ -76,6 +76,11 @@ async def load_config():
                     if isinstance(urls, str):
                         urls = [urls]
                     
+                    # Validate URLs start with http://
+                    for url in urls:
+                        if not url.startswith('http://'):
+                            print(f"Error: URL {url} must start with http://")
+                            return
                     try:
                         router = Router(
                             model_name=model_name,
@@ -133,12 +138,13 @@ This script implements a FastAPI-based load balancer that distributes requests a
 It supports both POST requests for specific model inference and GET requests that aggregate results from all models.
 """
 
-async def check_model(req: Request, routers: dict,  suffix_used: str, headers: dict):
+async def check_model(req: Request, routers: dict, suffix_used: str, headers: dict):
     """Handle POST requests for specific model inference, with streaming support."""
     try:
         data = await req.json()
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Failed to parse request JSON: {str(e)}")
+    
     model_name = data.get("model", None)
     if not model_name:
         raise HTTPException(status_code=400, detail="Model name not provided")
@@ -149,6 +155,7 @@ async def check_model(req: Request, routers: dict,  suffix_used: str, headers: d
         raise HTTPException(status_code=400, detail="Router not found for model")
     
     full_url = f"http://{router.host}:{router.port}/v1/{suffix_used}"
+    headers["Content-Type"] = "application/json"
     
     # If streaming is requested, handle it differently
     if data.get("stream", False):
@@ -156,18 +163,25 @@ async def check_model(req: Request, routers: dict,  suffix_used: str, headers: d
             async with aiohttp.ClientSession() as session:
                 async with session.post(full_url, json=data) as response:
                     async for line in response.content:
-                        print("line", line)
                         if line:
-                            # Each line from OpenAI stream is prefixed with "data: "
                             yield line
         
         return stream_generator(), 200
     
-    # Non-streaming request handling remains the same
+    # Non-streaming request handling
     async with aiohttp.ClientSession() as session:
         async with session.post(full_url, json=data) as response:
             print("response", response)
-            return await response.json(), response.status
+            try:
+                return await response.json(), response.status
+            except aiohttp.client_exceptions.ContentTypeError:
+                # If Content-Type is missing, try to parse the response text as JSON
+                text = await response.text()
+                try:
+                    return json.loads(text), response.status
+                except json.JSONDecodeError:
+                    raise HTTPException(status_code=500, 
+                                     detail="Invalid JSON response from upstream server")
 
 async def merge_across_models(req: Request, routers: dict, suffix_used: str, headers: dict):
     """
