@@ -23,6 +23,7 @@ class Router(BaseModel, Generic[T]):
     process: Optional[T] = None
     port: int
     host: Optional[str] = "127.0.0.1"
+    created_at: Optional[int] = int(time.time())
 
 
 # Example endpoints_config.yaml:
@@ -218,6 +219,22 @@ async def merge_across_models(req: Request, routers: dict, suffix_used: str, hea
             
     return final_response, final_status_code
 
+async def list_models():
+    """Return list of available models in OpenAI format"""
+    models = []
+    for model_name, router in routers.items():
+        models.append({
+            "id": model_name,
+            "object": "model",
+            "created": router.created_at,  # Use the stored creation time
+            "owned_by": "organization-owner"
+        })
+    
+    return {
+        "object": "list",
+        "data": models
+    }
+
 @app.api_route("/v1/{suffix:path}", methods=["POST", "GET"])
 async def api_router(suffix: str, request: Request):
     """Main API route handler with streaming support."""
@@ -226,7 +243,17 @@ async def api_router(suffix: str, request: Request):
     headers = {key: value for key, value in headers.items() if key not in excluded_headers}
 
     if request.method == "POST":
-        response_data, response_status_code = await check_model(request, routers, suffix, headers)
+        try:
+            response_data, response_status_code = await check_model(request, routers, suffix, headers)
+        except Exception as e:
+            print(f"Error in check_model: {e}")
+            return JSONResponse(
+                content={
+                    "error": str(e),
+                    "solution": "follow the openai api spec"
+                },
+                status_code=500
+            )
         
         # Handle streaming response
         if isinstance(response_data, AsyncGenerator):
@@ -238,8 +265,21 @@ async def api_router(suffix: str, request: Request):
         
         return JSONResponse(content=response_data, status_code=response_status_code)
     else:  # GET
-        response_json, response_status_code = await merge_across_models(request, routers, suffix, headers)
+        if suffix == "models":
+            return JSONResponse(content=await list_models(), status_code=200)
+        try:    
+            response_json, response_status_code = await merge_across_models(request, routers, suffix, headers)
+        except Exception as e:
+            print(f"Error in merge_across_models: {e}")
+            return JSONResponse(
+                content={
+                    "error": str(e),
+                    "solution": "follow the openai api spec"
+                },
+                status_code=500
+            )
         return JSONResponse(content=response_json, status_code=response_status_code)
+
 
 if __name__ == "__main__":
     """
